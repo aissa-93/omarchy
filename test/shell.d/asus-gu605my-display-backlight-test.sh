@@ -32,6 +32,7 @@ SH
 cat >"$test_tmp/bin/limine-mkinitcpio" <<'SH'
 #!/bin/bash
 printf 'limine-mkinitcpio\n' >>"$CALL_LOG"
+[[ -z ${FAIL_REBUILD:-} ]]
 SH
 
 cat >"$test_tmp/bin/omarchy-state" <<'SH'
@@ -43,6 +44,7 @@ chmod +x "$test_tmp/bin"/*
 
 conf="$test_tmp/limine-entry-tool.d/asus-gu605my-display-backlight.conf"
 call_log="$test_tmp/calls.log"
+marker="$test_tmp/migrations/1790188786"
 
 # Sourced the way run_logged runs it.
 run_leaf() {
@@ -69,21 +71,34 @@ run_migration() {
     OMARCHY_PATH="$ROOT" \
     TEST_PRODUCT_NAME="$1" \
     OMARCHY_GU605MY_BACKLIGHT_CONF="$conf" \
+    OMARCHY_GU605MY_REBUILD_MARKER="$marker" \
     bash -euo pipefail "$migration" >/dev/null
 }
 
-rm -rf "${conf%/*}"
+rm -rf "${conf%/*}" "${marker%/*}"
+FAIL_REBUILD=1 run_migration "ROG Zephyrus G16 GU605MY_GU605MY" &&
+  fail "the migration stays pending when the rebuild fails"
+[[ -e $marker ]] && fail "the migration stays pending when the rebuild fails"
+grep -q 'state set reboot-required' "$call_log" && fail "the migration stays pending when the rebuild fails"
+pass "the migration stays pending when the rebuild fails"
+
+run_migration "ROG Zephyrus G16 GU605MY_GU605MY" || fail "the migration retries a failed rebuild"
+grep -q '^limine-mkinitcpio$' "$call_log" || fail "the migration retries a failed rebuild"
+pass "the migration retries a failed rebuild"
+
+rm -rf "${conf%/*}" "${marker%/*}"
 run_migration "ROG Zephyrus G16 GU605MY_GU605MY" || fail "the migration applies the fix and asks for a reboot"
 [[ -f $conf ]] || fail "the migration writes the kernel option"
 grep -q '^limine-mkinitcpio$' "$call_log" || fail "the migration rebuilds the boot image"
 grep -q 'state set reboot-required' "$call_log" || fail "the migration asks for a reboot"
+[[ -e $marker ]] || fail "the migration records the rebuild"
 pass "the migration applies the fix and asks for a reboot"
 
 run_migration "ROG Zephyrus G16 GU605MY_GU605MY" || fail "the migration no-ops when the fix is already present"
 [[ -s $call_log ]] && fail "the migration no-ops when the fix is already present"
 pass "the migration no-ops when the fix is already present"
 
-rm -rf "${conf%/*}"
+rm -rf "${conf%/*}" "${marker%/*}"
 run_migration "ROG Zephyrus G14 GA403UV" || fail "the migration no-ops on other hardware"
-[[ -s $call_log || -e $conf ]] && fail "the migration no-ops on other hardware"
+[[ -s $call_log || -e $conf || -e $marker ]] && fail "the migration no-ops on other hardware"
 pass "the migration no-ops on other hardware"
