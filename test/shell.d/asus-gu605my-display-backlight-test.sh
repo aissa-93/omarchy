@@ -45,6 +45,8 @@ chmod +x "$test_tmp/bin"/*
 conf="$test_tmp/limine-entry-tool.d/asus-gu605my-display-backlight.conf"
 call_log="$test_tmp/calls.log"
 marker="$test_tmp/migrations/1790188786"
+cmdline="$test_tmp/cmdline"
+echo "quiet splash" >"$cmdline"
 
 # Sourced the way run_logged runs it.
 run_leaf() {
@@ -72,12 +74,14 @@ run_migration() {
     TEST_PRODUCT_NAME="$1" \
     OMARCHY_GU605MY_BACKLIGHT_CONF="$conf" \
     OMARCHY_GU605MY_REBUILD_MARKER="$marker" \
+    OMARCHY_GU605MY_RUNNING_CMDLINE="$cmdline" \
     bash -euo pipefail "$migration" >/dev/null
 }
 
 rm -rf "${conf%/*}" "${marker%/*}"
 FAIL_REBUILD=1 run_migration "ROG Zephyrus G16 GU605MY_GU605MY" &&
   fail "the migration stays pending when the rebuild fails"
+[[ -f $conf ]] && grep -q '^limine-mkinitcpio$' "$call_log" || fail "the migration stays pending when the rebuild fails"
 [[ -e $marker ]] && fail "the migration stays pending when the rebuild fails"
 grep -q 'state set reboot-required' "$call_log" && fail "the migration stays pending when the rebuild fails"
 pass "the migration stays pending when the rebuild fails"
@@ -98,7 +102,19 @@ run_migration "ROG Zephyrus G16 GU605MY_GU605MY" || fail "the migration no-ops w
 [[ -s $call_log ]] && fail "the migration no-ops when the fix is already present"
 pass "the migration no-ops when the fix is already present"
 
+rm -rf "${marker%/*}"
+echo "quiet splash i915.enable_dpcd_backlight=3" >"$cmdline"
+run_migration "ROG Zephyrus G16 GU605MY_GU605MY" || fail "the migration no-ops when the machine already booted with the fix"
+[[ -s $call_log || -e $marker ]] && fail "the migration no-ops when the machine already booted with the fix"
+pass "the migration no-ops when the machine already booted with the fix"
+
 rm -rf "${conf%/*}" "${marker%/*}"
+run_migration "ROG Zephyrus G16 GU605MY_GU605MY" || fail "the migration applies the fix when only the command line carries the option"
+grep -q '^limine-mkinitcpio$' "$call_log" || fail "the migration applies the fix when only the command line carries the option"
+pass "the migration applies the fix when only the command line carries the option"
+
+rm -rf "${conf%/*}" "${marker%/*}"
+echo "quiet splash" >"$cmdline"
 run_migration "ROG Zephyrus G14 GA403UV" || fail "the migration no-ops on other hardware"
 [[ -s $call_log || -e $conf || -e $marker ]] && fail "the migration no-ops on other hardware"
 pass "the migration no-ops on other hardware"
